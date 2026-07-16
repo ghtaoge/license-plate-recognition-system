@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -66,16 +67,86 @@ def test_factory_selects_mock_provider(tmp_path, monkeypatch):
     assert isinstance(recognizer, MockPlateRecognizer)
 
 
-def test_local_provider_reports_missing_model_path(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCAL_MODEL_PATH", "")
+def test_local_provider_reports_no_plate_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("RECOGNIZER_PROVIDER", "local")
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'recognitions.db'}")
     settings = Settings.from_env()
-    recognizer = LocalPlateRecognizer(settings)
 
-    with pytest.raises(AppError) as error:
-        recognizer.recognize(tmp_path / "car.jpg", "car.jpg")
+    with patch("app.recognizers.local.lpr3.LicensePlateCatcher") as catcher_cls:
+        catcher_instance = MagicMock()
+        catcher_cls.return_value = catcher_instance
+        catcher_instance.return_value = []
+        recognizer = LocalPlateRecognizer(settings)
 
-    assert error.value.code == "LOCAL_MODEL_NOT_CONFIGURED"
-    assert error.value.message == "本地识别未配置模型路径"
+        image = tmp_path / "car.png"
+        image.write_bytes(b"fake-content")
+
+        with patch("app.recognizers.local.cv2.imread", return_value=MagicMock()):
+            with pytest.raises(AppError) as error:
+                recognizer.recognize(image, "car.png")
+
+            assert error.value.code == "PLATE_NOT_RECOGNIZED"
+            assert error.value.message == "未识别到符合格式的车牌号"
+
+
+def test_local_provider_returns_plate_from_hyperlpr(tmp_path, monkeypatch):
+    monkeypatch.setenv("RECOGNIZER_PROVIDER", "local")
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'recognitions.db'}")
+    settings = Settings.from_env()
+
+    with patch("app.recognizers.local.lpr3.LicensePlateCatcher") as catcher_cls:
+        catcher_instance = MagicMock()
+        catcher_cls.return_value = catcher_instance
+        catcher_instance.return_value = [("粤B12345", 0.95, 2, [10, 20, 200, 80])]
+        recognizer = LocalPlateRecognizer(settings)
+
+        fake_image = MagicMock()
+        with patch("app.recognizers.local.cv2.imread", return_value=fake_image):
+            result = recognizer.recognize(tmp_path / "car.png", "car.png")
+
+        assert result.plate_number == "粤B12345"
+        assert result.confidence == 0.95
+        assert result.provider == "local"
+        assert result.message == "本地识别完成"
+        assert result.bbox == {"x1": 10, "y1": 20, "x2": 200, "y2": 80}
+
+
+def test_local_provider_filters_invalid_plate_format(tmp_path, monkeypatch):
+    monkeypatch.setenv("RECOGNIZER_PROVIDER", "local")
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'recognitions.db'}")
+    settings = Settings.from_env()
+
+    with patch("app.recognizers.local.lpr3.LicensePlateCatcher") as catcher_cls:
+        catcher_instance = MagicMock()
+        catcher_cls.return_value = catcher_instance
+        catcher_instance.return_value = [("INVALID", 0.90, 2, [0, 0, 100, 50])]
+        recognizer = LocalPlateRecognizer(settings)
+
+        fake_image = MagicMock()
+        with patch("app.recognizers.local.cv2.imread", return_value=fake_image):
+            with pytest.raises(AppError) as error:
+                recognizer.recognize(tmp_path / "car.png", "car.png")
+
+            assert error.value.code == "PLATE_NOT_RECOGNIZED"
+
+
+def test_local_provider_reports_image_read_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("RECOGNIZER_PROVIDER", "local")
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'recognitions.db'}")
+    settings = Settings.from_env()
+
+    with patch("app.recognizers.local.lpr3.LicensePlateCatcher"):
+        recognizer = LocalPlateRecognizer(settings)
+
+        with patch("app.recognizers.local.cv2.imread", return_value=None):
+            with pytest.raises(AppError) as error:
+                recognizer.recognize(tmp_path / "missing.png", "missing.png")
+
+            assert error.value.code == "LOCAL_RECOGNITION_FAILED"
 
 
 def test_ai_provider_reports_missing_configuration(tmp_path, monkeypatch):

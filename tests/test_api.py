@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -158,6 +159,64 @@ def test_homepage_serves_chinese_workbench(tmp_path, monkeypatch):
     assert "车牌号识别系统" in response.text
     assert "上传图片" in response.text
     assert "开始识别" in response.text
+
+
+def _local_client(tmp_path, monkeypatch) -> TestClient:
+    monkeypatch.setenv("RECOGNIZER_PROVIDER", "local")
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'recognitions.db'}")
+    return TestClient(create_app())
+
+
+def test_local_upload_returns_real_provider_result_and_history(tmp_path, monkeypatch):
+    client = _local_client(tmp_path, monkeypatch)
+
+    with patch("app.recognizers.local.lpr3.LicensePlateCatcher") as catcher_cls:
+        catcher = MagicMock()
+        catcher_cls.return_value = catcher
+        catcher.return_value = [("粤B12345", 0.92, 2, [10, 20, 200, 80])]
+        with patch("app.recognizers.local.cv2.imread", return_value=MagicMock()):
+            response = client.post(
+                "/api/recognitions",
+                files={"file": ("car.png", b"image-content", "image/png")},
+            )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plate_number"] == "粤B12345"
+    assert body["confidence"] == 0.92
+    assert body["provider"] == "local"
+    assert body["status"] == "success"
+
+    history = client.get("/api/recognitions").json()
+    assert history[0]["plate_number"] == "粤B12345"
+    assert history[0]["provider"] == "local"
+    assert history[0]["status"] == "success"
+
+
+def test_local_upload_persists_explicit_no_match_without_mock_fallback(tmp_path, monkeypatch):
+    client = _local_client(tmp_path, monkeypatch)
+
+    with patch("app.recognizers.local.lpr3.LicensePlateCatcher") as catcher_cls:
+        catcher = MagicMock()
+        catcher_cls.return_value = catcher
+        catcher.return_value = []
+        with patch("app.recognizers.local.cv2.imread", return_value=MagicMock()):
+            response = client.post(
+                "/api/recognitions",
+                files={"file": ("car.png", b"image-content", "image/png")},
+            )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "PLATE_NOT_RECOGNIZED"
+    assert response.json()["message"] == "未识别到符合格式的车牌号"
+
+    history = client.get("/api/recognitions").json()
+    assert history[0]["plate_number"] == ""
+    assert history[0]["confidence"] == 0
+    assert history[0]["provider"] == "local"
+    assert history[0]["status"] == "failed"
+    assert history[0]["error_message"] == "未识别到符合格式的车牌号"
 
 
 def test_upload_image_returns_result_and_history(tmp_path, monkeypatch):

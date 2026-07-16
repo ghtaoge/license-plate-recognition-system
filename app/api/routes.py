@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.core.config import Settings
@@ -47,7 +49,9 @@ async def create_recognition(
 ) -> dict[str, object]:
     content = await file.read()
     try:
-        record = service.recognize_upload(content, file.filename or "upload.jpg", file.content_type or "")
+        record = await asyncio.to_thread(
+            service.recognize_upload, content, file.filename or "upload.jpg", file.content_type or ""
+        )
         return _record_to_dict(record)
     except AppError as error:
         raise HTTPException(

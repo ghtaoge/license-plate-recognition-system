@@ -15,3 +15,4 @@ def create_recognizer(settings: Settings) -> PlateRecognizer:
     if provider == "ai":
         return AiPlateRecognizer(settings)
     raise AppError("PROVIDER_NOT_FOUND", "识别模式配置错误", f"Unsupported provider: {provider}")
+
