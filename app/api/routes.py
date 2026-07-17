@@ -1,6 +1,7 @@
 import asyncio
+import math
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -14,19 +15,18 @@ from app.services.storage_service import StorageService
 router = APIRouter()
 
 
-def get_settings() -> Settings:
-    return Settings.from_env()
+def _get_settings(request: Request) -> Settings:
+    return request.app.state.settings
 
 
-def get_repository(settings: Settings = Depends(get_settings)) -> HistoryRepository:
-    repository = HistoryRepository(settings.database_path)
-    repository.initialize()
-    return repository
+def _get_repository(request: Request) -> HistoryRepository:
+    return request.app.state.repository
 
 
 def get_recognition_service(
-    settings: Settings = Depends(get_settings),
-    repository: HistoryRepository = Depends(get_repository),
+    request: Request,
+    settings: Settings = Depends(_get_settings),
+    repository: HistoryRepository = Depends(_get_repository),
 ) -> RecognitionService:
     recognizer = create_recognizer(settings)
     storage = StorageService(settings.upload_dir)
@@ -34,7 +34,7 @@ def get_recognition_service(
 
 
 @router.get("/config")
-def get_config(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+def get_config(settings: Settings = Depends(_get_settings)) -> dict[str, object]:
     return {
         "provider": settings.recognizer_provider,
         "available_providers": settings.available_providers,
@@ -63,9 +63,39 @@ async def create_recognition(
 @router.get("/recognitions")
 def list_recognitions(
     limit: int = 20,
-    repository: HistoryRepository = Depends(get_repository),
-) -> list[dict[str, object]]:
-    return [_record_to_dict(record) for record in repository.list_recent(limit)]
+    page: int = 1,
+    repository: HistoryRepository = Depends(_get_repository),
+) -> dict[str, object]:
+    bounded_limit = min(max(limit, 1), 100)
+    total = repository.count()
+    max_page = max(1, math.ceil(total / bounded_limit))
+    bounded_page = min(max(page, 1), max_page)
+    records = repository.list_recent(bounded_limit, bounded_page)
+    return {
+        "records": [_record_to_dict(record) for record in records],
+        "total": total,
+        "page": bounded_page,
+        "limit": bounded_limit,
+    }
+
+
+@router.delete("/recognitions/{record_id}")
+def delete_recognition(
+    record_id: int,
+    repository: HistoryRepository = Depends(_get_repository),
+) -> dict[str, object]:
+    deleted = repository.delete(record_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "记录不存在"})
+    return {"id": record_id, "deleted": True}
+
+
+@router.delete("/recognitions")
+def delete_all_recognitions(
+    repository: HistoryRepository = Depends(_get_repository),
+) -> dict[str, object]:
+    count = repository.delete_all()
+    return {"deleted_count": count}
 
 
 def _record_to_dict(record: RecognitionRecord) -> dict[str, object]:
@@ -80,4 +110,5 @@ def _record_to_dict(record: RecognitionRecord) -> dict[str, object]:
         "error_message": record.error_message,
         "created_at": record.created_at.isoformat(),
         "message": record.message,
+        "bbox": record.bbox,
     }

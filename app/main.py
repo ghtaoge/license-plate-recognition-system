@@ -11,9 +11,14 @@ from app.services.history_repository import HistoryRepository
 def create_app() -> FastAPI:
     settings = Settings.from_env()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    HistoryRepository(settings.database_path).initialize()
+
+    repository = HistoryRepository(settings.database_path)
+    repository.initialize()
 
     app = FastAPI(title="车牌号识别系统")
+    app.state.settings = settings
+    app.state.repository = repository
+
     app.include_router(router, prefix="/api")
     app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 

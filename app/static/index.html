@@ -71,6 +71,7 @@
             <div><dt>置信度</dt><dd id="confidence">--</dd></div>
             <div><dt>识别模式</dt><dd id="provider">--</dd></div>
             <div><dt>耗时</dt><dd id="elapsed">--</dd></div>
+            <div><dt>定位坐标</dt><dd id="bboxInfo">--</dd></div>
           </dl>
         </div>
       </section>
@@ -81,24 +82,34 @@
             <p class="eyebrow">Records</p>
             <h2>识别记录</h2>
           </div>
-          <button id="refreshButton" class="btn btn-secondary" type="button">刷新记录</button>
+          <div class="history-actions">
+            <button id="clearHistoryButton" class="btn btn-ghost" type="button">清空记录</button>
+            <button id="refreshButton" class="btn btn-secondary" type="button">刷新记录</button>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
+                <th>图片</th>
                 <th>车牌号</th>
                 <th>置信度</th>
                 <th>模式</th>
                 <th>状态</th>
                 <th>耗时</th>
                 <th>时间</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody id="historyBody">
-              <tr><td colspan="6" class="empty-cell">暂无识别记录</td></tr>
+              <tr><td colspan="8" class="empty-cell">暂无识别记录</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="pagination">
+          <span id="paginationInfo" class="pagination-info">暂无记录</span>
+          <button id="prevPageButton" class="btn btn-ghost btn-sm" type="button" disabled>上一页</button>
+          <button id="nextPageButton" class="btn btn-ghost btn-sm" type="button" disabled>下一页</button>
         </div>
       </section>
     </main>
