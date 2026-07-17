@@ -44,6 +44,7 @@ class RecognitionService:
                 error_message="",
                 created_at=datetime.now(timezone.utc),
                 message=result.message,
+                bbox=result.bbox,
             )
             return self._history_repository.create(record)
         except AppError as error:

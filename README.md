@@ -76,10 +76,13 @@ $env:LOCAL_MODEL_PATH = "C:\Program Files\Tesseract-OCR\tesseract.exe"
 ```text
 GET  /api/config
 POST /api/recognitions
-GET  /api/recognitions
+GET  /api/recognitions?limit=20&page=1
+DELETE /api/recognitions/{record_id}
+DELETE /api/recognitions
 ```
 
 `POST /api/recognitions` 使用 `multipart/form-data`，字段名为 `file`。
+`GET /api/recognitions` 返回包含 `records`、`total`、`page` 和 `limit` 的分页对象。
 
 ## 测试
 

@@ -4,6 +4,9 @@
     previewUrl: "",
     requestId: 0,
     isRecognizing: false,
+    historyPage: 1,
+    historyLimit: 20,
+    historyTotal: 0,
   };
 
   const elements = {
@@ -14,6 +17,7 @@
     recognizeButton: document.getElementById("recognizeButton"),
     clearButton: document.getElementById("clearButton"),
     refreshButton: document.getElementById("refreshButton"),
+    clearHistoryButton: document.getElementById("clearHistoryButton"),
     message: document.getElementById("message"),
     fileName: document.getElementById("fileName"),
     previewImage: document.getElementById("previewImage"),
@@ -23,7 +27,11 @@
     confidence: document.getElementById("confidence"),
     provider: document.getElementById("provider"),
     elapsed: document.getElementById("elapsed"),
+    bboxInfo: document.getElementById("bboxInfo"),
     historyBody: document.getElementById("historyBody"),
+    paginationInfo: document.getElementById("paginationInfo"),
+    prevPageButton: document.getElementById("prevPageButton"),
+    nextPageButton: document.getElementById("nextPageButton"),
   };
 
   function escapeHtml(value) {
@@ -70,6 +78,13 @@
     }
 
     return date.toLocaleString("zh-CN", { hour12: false });
+  }
+
+  function formatBbox(bbox) {
+    if (!bbox) {
+      return "--";
+    }
+    return `(${bbox.x1}, ${bbox.y1}) → (${bbox.x2}, ${bbox.y2})`;
   }
 
   function setResultStatus(text, className) {
@@ -154,6 +169,7 @@
     elements.confidence.textContent = formatConfidence(record.confidence);
     elements.provider.textContent = record.provider || "--";
     elements.elapsed.textContent = formatElapsed(record.elapsed_ms);
+    elements.bboxInfo.textContent = formatBbox(record.bbox);
 
     if (record.status === "success") {
       setResultStatus("识别成功", "badge-green");
@@ -195,6 +211,7 @@
         return;
       }
       renderResult(result);
+      state.historyPage = 1;
       await loadHistory();
     } catch (error) {
       if (requestId !== state.requestId) {
@@ -213,9 +230,14 @@
     }
   }
 
-  function renderHistory(records) {
+  function renderHistory(data) {
+    const records = data.records || [];
+    state.historyTotal = data.total || 0;
+    state.historyPage = data.page;
+
     if (!Array.isArray(records) || records.length === 0) {
-      elements.historyBody.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无识别记录</td></tr>';
+      elements.historyBody.innerHTML = '<tr><td colspan="8" class="empty-cell">暂无识别记录</td></tr>';
+      updatePagination();
       return;
     }
 
@@ -223,36 +245,111 @@
       .map((record) => {
         const statusLabel = record.status === "success" ? "成功" : "异常";
         const statusClass = record.status === "success" ? "badge-green" : "badge-red";
+        const thumbnail = record.image_url
+          ? `<img src="${escapeHtml(record.image_url)}" alt="缩略图" class="history-thumb" loading="lazy">`
+          : "--";
 
         return `
           <tr>
+            <td class="thumb-cell">${thumbnail}</td>
             <td class="plate-cell">${escapeHtml(record.plate_number || "--")}</td>
             <td>${escapeHtml(formatConfidence(record.confidence))}</td>
             <td>${escapeHtml(record.provider || "--")}</td>
             <td><span class="badge ${statusClass}">${statusLabel}</span></td>
             <td>${escapeHtml(formatElapsed(record.elapsed_ms))}</td>
             <td>${escapeHtml(formatTime(record.created_at))}</td>
+            <td class="action-cell"><button class="btn btn-ghost btn-sm delete-btn" data-id="${record.id}" title="删除此记录">删除</button></td>
           </tr>
         `;
       })
       .join("");
+
+    updatePagination();
+
+    // Bind delete buttons
+    elements.historyBody.querySelectorAll(".delete-btn").forEach((btn) => {
+      btn.addEventListener("click", () => deleteRecord(parseInt(btn.dataset.id, 10)));
+    });
+  }
+
+  function updatePagination() {
+    const totalPages = Math.ceil(state.historyTotal / state.historyLimit) || 1;
+    const currentPage = state.historyPage;
+    const showingStart = (currentPage - 1) * state.historyLimit + 1;
+    const showingEnd = Math.min(currentPage * state.historyLimit, state.historyTotal);
+
+    if (state.historyTotal === 0) {
+      elements.paginationInfo.textContent = "暂无记录";
+    } else {
+      elements.paginationInfo.textContent = `第 ${showingStart}-${showingEnd} 条 / 共 ${state.historyTotal} 条 · 第 ${currentPage}/${totalPages} 页`;
+    }
+
+    elements.prevPageButton.disabled = currentPage <= 1;
+    elements.nextPageButton.disabled = currentPage >= totalPages;
   }
 
   async function loadHistory() {
     try {
-      const records = await fetchJson("/api/recognitions");
-      renderHistory(records);
+      const data = await fetchJson(`/api/recognitions?limit=${state.historyLimit}&page=${state.historyPage}`);
+      renderHistory(data);
     } catch (error) {
-      elements.historyBody.innerHTML = `<tr><td colspan="6" class="empty-cell">${escapeHtml(
+      elements.historyBody.innerHTML = `<tr><td colspan="8" class="empty-cell">${escapeHtml(
         `记录加载失败：${error.message}`,
       )}</td></tr>`;
+    }
+  }
+
+  async function deleteRecord(recordId) {
+    try {
+      await fetchJson(`/api/recognitions/${recordId}`, { method: "DELETE" });
+      await loadHistory();
+    } catch (error) {
+      showMessage(`删除失败：${error.message}`, "error");
+    }
+  }
+
+  async function clearAllHistory() {
+    if (!confirm("确定要清空所有识别记录吗？此操作不可恢复。")) {
+      return;
+    }
+    try {
+      await fetchJson("/api/recognitions", { method: "DELETE" });
+      state.historyPage = 1;
+      await loadHistory();
+      showMessage("已清空所有记录", "success");
+    } catch (error) {
+      showMessage(`清空失败：${error.message}`, "error");
+    }
+  }
+
+  function prevPage() {
+    if (state.historyPage > 1) {
+      state.historyPage--;
+      loadHistory();
+    }
+  }
+
+  function nextPage() {
+    const totalPages = Math.ceil(state.historyTotal / state.historyLimit) || 1;
+    if (state.historyPage < totalPages) {
+      state.historyPage++;
+      loadHistory();
     }
   }
 
   elements.chooseButton.addEventListener("click", () => elements.fileInput.click());
   elements.clearButton.addEventListener("click", clearSelection);
   elements.recognizeButton.addEventListener("click", recognizeSelectedFile);
-  elements.refreshButton.addEventListener("click", loadHistory);
+  elements.refreshButton.addEventListener("click", () => loadHistory());
+  if (elements.clearHistoryButton) {
+    elements.clearHistoryButton.addEventListener("click", clearAllHistory);
+  }
+  if (elements.prevPageButton) {
+    elements.prevPageButton.addEventListener("click", prevPage);
+  }
+  if (elements.nextPageButton) {
+    elements.nextPageButton.addEventListener("click", nextPage);
+  }
 
   elements.fileInput.addEventListener("change", (event) => {
     updateSelectedFile(event.target.files[0]);

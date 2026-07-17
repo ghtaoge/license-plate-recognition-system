@@ -24,3 +24,4 @@ class RecognitionRecord:
     error_message: str
     created_at: datetime
     message: str
+    bbox: dict[str, int] | None = None
